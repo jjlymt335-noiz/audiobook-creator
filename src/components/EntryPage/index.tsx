@@ -1,0 +1,320 @@
+import React, { useState } from 'react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import { DocumentUpload } from './DocumentUpload';
+import { UrlImport } from './UrlImport';
+import { ProjectSelector } from './ProjectSelector';
+import { AutoAssignToggle } from './AutoAssignToggle';
+import { VoiceSelector } from './VoiceSelector';
+import { useProjectStore, useUIStore } from '@/store';
+import { Loader2, Mic2, ArrowRight, PenLine } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import type { DocumentParseResult } from '@/types/project';
+
+export function EntryPage() {
+  const [activeTab, setActiveTab] = useState('upload');
+  const [autoAssignEnabled, setAutoAssignEnabled] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [uploadedDoc, setUploadedDoc] = useState<DocumentParseResult | null>(null);
+  const [podcastName, setPodcastName] = useState('');
+  const [manualText, setManualText] = useState('');
+  const [narratorVoice, setNarratorVoice] = useState<{ voiceId: string; voiceName: string } | null>(null);
+
+  const currentProject = useProjectStore((state) => state.currentProject);
+  const createProject = useProjectStore((state) => state.createProject);
+  const autoAssignVoices = useProjectStore((state) => state.autoAssignVoices);
+  const setCurrentPage = useUIStore((state) => state.setCurrentPage);
+  const setAutoAssigning = useUIStore((state) => state.setAutoAssigning);
+  const showToast = useUIStore((state) => state.showToast);
+
+  // Auto-generate audiobook title from document
+  const handleUploadComplete = (doc: DocumentParseResult) => {
+    setUploadedDoc(doc);
+    if (!podcastName) {
+      // Use document title, or extract from first meaningful line
+      const autoTitle = doc.title
+        || doc.text.split('\n').find(line => line.trim().length > 2)?.trim().slice(0, 60)
+        || '';
+      if (autoTitle) {
+        setPodcastName(autoTitle);
+      }
+    }
+  };
+
+  const handleGenerate = async () => {
+    setIsGenerating(true);
+    console.log('\n' + '='.repeat(80));
+    console.log('🎬 GENERATE BUTTON CLICKED');
+    console.log('='.repeat(80));
+
+    try {
+      // 第1步：确保有项目
+      console.log('📋 Current project state:', {
+        exists: !!currentProject,
+        id: currentProject?.id,
+        title: currentProject?.title,
+        textLength: currentProject?.source_text?.length || 0,
+      });
+
+      if (!currentProject) {
+        console.log('⚠️ No current project found, creating one...');
+        const sourceText = uploadedDoc?.text || manualText || '';
+        const lang = uploadedDoc?.language || (/[\u4e00-\u9fff]/.test(sourceText) ? 'zh' : 'en');
+        createProject({
+          text: sourceText,
+          language: lang,
+          format: 'txt',
+          title: podcastName || 'Untitled Audiobook',
+        });
+      } else if (podcastName && currentProject.title !== podcastName) {
+        // Update title if user entered a custom name
+        useProjectStore.getState().updateProjectTitle(podcastName);
+      }
+
+      // 获取最新的项目状态
+      const project = useProjectStore.getState().currentProject;
+
+      if (!project) {
+        throw new Error('Failed to get or create project');
+      }
+
+      console.log('✅ Project ready:', {
+        id: project.id,
+        title: project.title,
+        textLength: project.source_text.length,
+        language: project.language,
+        hasText: !!project.source_text,
+      });
+
+      // 第2步：处理voice分配
+      if (autoAssignEnabled && project.source_text) {
+        // 方式A：Auto-assign（AI自动识别和匹配）
+        console.log('\n🚀🚀🚀 AUTO-ASSIGN ENABLED AND STARTING 🚀🚀🚀');
+        console.log('📝 Text length:', project.source_text.length);
+        console.log('📝 Text preview (first 300 chars):');
+        console.log(project.source_text.slice(0, 300));
+        console.log('📝 Language:', project.language);
+
+        setAutoAssigning(true);
+
+        try {
+          console.log('🔄 Calling autoAssignVoices...');
+          await autoAssignVoices('default_user');
+
+          // 检查结果
+          const updatedProject = useProjectStore.getState().currentProject;
+          console.log('✅ Auto-assign completed!');
+          console.log('📊 Results:', {
+            speakersCount: updatedProject?.speakers.length || 0,
+            segmentsCount: updatedProject?.segments.length || 0,
+            speakers: updatedProject?.speakers.map(s => ({
+              id: s.speaker_id,
+              name: s.speaker_name,
+              voiceId: s.voice_id,
+              segmentsCount: s.segments.length,
+            })),
+          });
+
+          showToast('Voices auto-assigned successfully!', 'success');
+        } catch (assignError) {
+          console.error('❌❌❌ AUTO-ASSIGN FAILED ❌❌❌');
+          console.error('Error:', assignError);
+          console.error('Error message:', assignError instanceof Error ? assignError.message : String(assignError));
+          console.error('Error stack:', assignError instanceof Error ? assignError.stack : 'N/A');
+          showToast('Auto-assign failed. Please assign voices manually.', 'error');
+        } finally {
+          setAutoAssigning(false);
+        }
+      } else if (!autoAssignEnabled && narratorVoice) {
+        // 方式B：手动选择（用户预先选择了Narrator音色）
+        console.log('\n👤 MANUAL VOICE SELECTION');
+        console.log('Narrator voice:', narratorVoice);
+
+        // 先调用auto-assign识别speakers（不分配voice）
+        if (project.source_text) {
+          try {
+            console.log('🔄 Calling autoAssignVoices to identify speakers...');
+            await autoAssignVoices('default_user');
+
+            // 然后手动分配用户选择的voice
+            const updatedProject = useProjectStore.getState().currentProject;
+            const assignVoiceToSpeaker = useProjectStore.getState().assignVoiceToSpeaker;
+
+            if (updatedProject && updatedProject.speakers.length >= 1 && narratorVoice) {
+              // 第一个speaker使用Narrator voice
+              assignVoiceToSpeaker(updatedProject.speakers[0].speaker_id, narratorVoice.voiceId, narratorVoice.voiceName);
+              console.log(`✅ Assigned Narrator voice to ${updatedProject.speakers[0].speaker_name}`);
+            }
+
+            showToast('Voice assigned successfully!', 'success');
+          } catch (error) {
+            console.error('❌ Failed to assign voice:', error);
+            showToast('Failed to assign voice', 'error');
+          }
+        }
+      } else {
+        if (!autoAssignEnabled) {
+          console.log('⚠️ Auto-assign NOT enabled, and no manual voices selected');
+        } else if (!project.source_text) {
+          console.log('⚠️ No source text, skipping voice assignment');
+        }
+      }
+
+      // 第3步：跳转到编辑器页面
+      console.log('\n🎯 Navigating to editor page...');
+      console.log('='.repeat(80) + '\n');
+      setCurrentPage('editor');
+    } catch (error) {
+      console.error('\n❌❌❌ GENERATION FAILED ❌❌❌');
+      console.error('Error:', error);
+      showToast('Failed to generate audiobook. Please try again.', 'error');
+      setAutoAssigning(false);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  // When auto-assign is off and user has a document/project, narrator voice is required
+  const needsVoice = !autoAssignEnabled && (uploadedDoc || currentProject);
+  const canGenerate = needsVoice ? !!narratorVoice : true;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-orange-50/60">
+      <div className="container mx-auto px-4 py-16">
+        {/* Header */}
+        <div className="text-center mb-14">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-orange-400 to-orange-600 shadow-lg shadow-orange-200 mb-5">
+            <Mic2 className="h-7 w-7 text-white" />
+          </div>
+          <h1 className="text-4xl font-bold text-gray-900 mb-3 tracking-tight">Audiobook Creator</h1>
+          <p className="text-lg text-gray-500 max-w-lg mx-auto">
+            Transform documents into professional audiobooks with AI-powered voices
+          </p>
+        </div>
+
+        {/* Main Content */}
+        <div className="max-w-3xl mx-auto space-y-6">
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="w-full bg-white/80 backdrop-blur border border-gray-200/60 shadow-sm h-12">
+              <TabsTrigger value="upload" className="flex-1 text-base data-[state=active]:text-orange-600">
+                Upload Document
+              </TabsTrigger>
+              <TabsTrigger value="url" className="flex-1 text-base data-[state=active]:text-orange-600">
+                Import URL
+              </TabsTrigger>
+              <TabsTrigger value="existing" className="flex-1 text-base data-[state=active]:text-orange-600">
+                Existing Project
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="upload">
+              <DocumentUpload onUploadComplete={handleUploadComplete} />
+            </TabsContent>
+
+            <TabsContent value="url">
+              <UrlImport onImportComplete={handleUploadComplete} />
+            </TabsContent>
+
+            <TabsContent value="existing">
+              <ProjectSelector />
+            </TabsContent>
+          </Tabs>
+
+          {/* Document Info */}
+          {uploadedDoc && (
+            <div className="bg-white rounded-xl border border-gray-200/80 p-5 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-base font-semibold text-gray-900">
+                    {uploadedDoc.title || 'Untitled Document'}
+                  </p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {uploadedDoc.format.toUpperCase()} • {uploadedDoc.language.toUpperCase()} •{' '}
+                    {uploadedDoc.text.length.toLocaleString()} characters
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Audiobook Title (optional) */}
+          {(uploadedDoc || currentProject) && (
+            <div className="bg-white rounded-xl border border-gray-200/80 p-5 shadow-sm">
+              <label className="block text-base font-medium text-gray-700 mb-2">
+                Audiobook Title
+                <span className="text-gray-400 font-normal ml-1.5 text-sm">(optional)</span>
+              </label>
+              <input
+                value={podcastName}
+                onChange={(e) => setPodcastName(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-200 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent placeholder-gray-400 bg-gray-50/50"
+                placeholder="Enter a name or leave blank to auto-generate..."
+              />
+            </div>
+          )}
+
+          {/* Auto-assign Toggle OR Manual Voice Selection */}
+          <AutoAssignToggle enabled={autoAssignEnabled} onToggle={setAutoAssignEnabled} />
+
+          {/* Manual Voice Selection */}
+          {!autoAssignEnabled && (uploadedDoc || currentProject) && (
+            <VoiceSelector
+              narratorVoice={narratorVoice}
+              onNarratorVoiceChange={(voiceId, voiceName) => setNarratorVoice({ voiceId, voiceName })}
+              language={uploadedDoc?.language || currentProject?.language || 'zh'}
+            />
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex flex-col items-center gap-3 pt-6">
+            <div className="flex items-center gap-4">
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={() => {
+                  createProject({
+                    text: '',
+                    language: 'zh',
+                    format: 'txt',
+                    title: podcastName || 'Untitled Audiobook',
+                  });
+                  setCurrentPage('editor');
+                }}
+                className="h-14 px-8 text-lg font-semibold border-2 border-orange-300 text-orange-600 hover:bg-orange-50 hover:border-orange-400 transition-all"
+              >
+                <PenLine className="mr-2 h-5 w-5" />
+                Start Writing
+              </Button>
+
+              <Button
+                size="lg"
+                onClick={handleGenerate}
+                disabled={isGenerating || !canGenerate}
+                className="h-14 px-8 text-lg font-semibold bg-orange-500 hover:bg-orange-600 text-white shadow-md shadow-orange-200 hover:shadow-lg hover:shadow-orange-200 transition-all"
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    Generate Audiobook
+                    <ArrowRight className="ml-2 h-5 w-5" />
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {needsVoice && !narratorVoice && (
+              <p className="text-center text-base text-orange-600">
+                Please select a narrator voice to continue
+              </p>
+            )}
+
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
