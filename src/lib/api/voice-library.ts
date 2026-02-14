@@ -65,11 +65,11 @@ function normalizeVoiceList(data: any): VoiceListResponse {
 
 // ============================================================
 // 公共音色库（Built-in voices）
-// GET /v2/voices?voice_type=built-in
+// GET /api/v1/voices?voice_type=built-in
 // ============================================================
 
 export async function getPinnedVoices(language = 'en'): Promise<Voice[]> {
-  const response = await apiClient.get('/v2/voices', {
+  const response = await apiClient.get('/api/v1/voices', {
     params: { voice_type: 'built-in', limit: 10 },
   });
   const data = normalizeVoiceList(response);
@@ -77,7 +77,7 @@ export async function getPinnedVoices(language = 'en'): Promise<Voice[]> {
 }
 
 export async function getPublicVoices(params?: VoiceLibraryQueryParams): Promise<VoiceListResponse> {
-  const response = await apiClient.get('/v2/voices', {
+  const response = await apiClient.get('/api/v1/voices', {
     params: {
       voice_type: 'built-in',
       keyword: params?.keyword,
@@ -96,11 +96,11 @@ export async function getPublicVoices(params?: VoiceLibraryQueryParams): Promise
 
 // ============================================================
 // 我的音色（Custom voices）
-// GET /v2/voices?voice_type=custom
+// GET /api/v1/voices?voice_type=custom
 // ============================================================
 
 export async function getMyVoices(params?: VoiceLibraryQueryParams): Promise<VoiceListResponse> {
-  const response = await apiClient.get('/v2/voices', {
+  const response = await apiClient.get('/api/v1/voices', {
     params: {
       voice_type: 'custom',
       keyword: params?.keyword,
@@ -151,14 +151,14 @@ export async function getRecentVoices(limit = 10): Promise<Voice[]> {
 
 // ============================================================
 // 根据 ID 获取音色
-// GET /v2/voices/{voice_id}
+// GET /api/v1/voices/{voice_id}
 // ============================================================
 
 export async function getVoicesByIds(voiceIds: string[]): Promise<Voice[]> {
   if (voiceIds.length === 0) return [];
   const promises = voiceIds.map(async (id) => {
     try {
-      const response = await apiClient.get(`/v2/voices/${id}`);
+      const response = await apiClient.get(`/api/v1/voices/${id}`);
       return normalizeVoice(response);
     } catch {
       return null;
@@ -197,8 +197,8 @@ export async function searchVoices(params: {
   });
 }
 
-/** 删除自定义音色 DELETE /v2/voices/{voice_id} */
+/** 删除自定义音色 DELETE /api/v1/voices/{voice_id} */
 export async function deleteVoice(voiceId: string): Promise<{ voice_id: string; display_name: string }> {
-  const response = await apiClient.delete(`/v2/voices/${voiceId}`);
+  const response = await apiClient.delete(`/api/v1/voices/${voiceId}`);
   return response as any;
 }
