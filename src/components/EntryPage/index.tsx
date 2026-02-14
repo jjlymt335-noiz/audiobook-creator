@@ -174,8 +174,8 @@ export function EntryPage() {
     }
   };
 
-  // When auto-assign is off and user has a document/project, narrator voice is required
-  const needsVoice = !autoAssignEnabled && (uploadedDoc || currentProject);
+  // When auto-assign is off, narrator voice is always required
+  const needsVoice = !autoAssignEnabled;
   const canGenerate = needsVoice ? !!narratorVoice : true;
 
   return (
@@ -257,7 +257,7 @@ export function EntryPage() {
           <AutoAssignToggle enabled={autoAssignEnabled} onToggle={setAutoAssignEnabled} />
 
           {/* Manual Voice Selection */}
-          {!autoAssignEnabled && (uploadedDoc || currentProject) && (
+          {!autoAssignEnabled && (
             <VoiceSelector
               narratorVoice={narratorVoice}
               onNarratorVoiceChange={(voiceId, voiceName) => setNarratorVoice({ voiceId, voiceName })}
