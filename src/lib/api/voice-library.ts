@@ -2,7 +2,8 @@ import { apiClient } from './client';
 import type { Voice, VoiceListResponse } from '@/types/api';
 
 // Voice Library API封装
-// 文档第四节：所有 Voice Library 端点以 /api/v2/voice-library/ 开头
+// 端点: GET /api/v1/voices  (API Key 认证)
+// 注意: skip 参数为页码(0=第一页)，非偏移量; API 不支持服务端语言筛选，需客户端过滤
 // 响应格式统一为 { code, message, data } — 由 client 拦截器自动解包
 
 // ============================================================
@@ -64,34 +65,106 @@ function normalizeVoiceList(data: any): VoiceListResponse {
 }
 
 // ============================================================
+// 语言标签映射（API 的 labels 第一字段为语言）
+// ============================================================
+
+const LANGUAGE_LABEL_MAP: Record<string, string> = {
+  zh: '中文', cn: '中文', chinese: '中文', '中文': '中文',
+  ja: '日本語', jp: '日本語', japanese: '日本語', '日本語': '日本語',
+  en: 'English', english: 'English',
+  ko: '한국어', korean: '한국어',
+};
+
+/** 判断音色 labels 是否包含目标语言 */
+function matchesLanguage(voice: Voice, language: string): boolean {
+  const target = LANGUAGE_LABEL_MAP[language.toLowerCase()] || language;
+  const labels = typeof voice.labels === 'string' ? voice.labels : '';
+  return labels.includes(target);
+}
+
+// ============================================================
+// 内部缓存：一次性拉取全部 built-in 音色（避免多次请求）
+// ============================================================
+
+let _builtInCache: Voice[] | null = null;
+let _builtInCacheTime = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 分钟
+
+async function getAllBuiltInVoices(): Promise<Voice[]> {
+  if (_builtInCache && Date.now() - _builtInCacheTime < CACHE_TTL) {
+    return _builtInCache;
+  }
+
+  const allVoices: Voice[] = [];
+  const PAGE_SIZE = 100;
+
+  for (let page = 0; page < 10; page++) {
+    try {
+      const response = await apiClient.get('/api/v1/voices', {
+        params: { voice_type: 'built-in', skip: page, limit: PAGE_SIZE },
+      });
+      const data = normalizeVoiceList(response);
+      allVoices.push(...data.voices);
+      if (data.voices.length < PAGE_SIZE) break;
+    } catch {
+      break;
+    }
+  }
+
+  _builtInCache = allVoices;
+  _builtInCacheTime = Date.now();
+  console.log(`Voice Library: cached ${allVoices.length} built-in voices`);
+  return allVoices;
+}
+
+// ============================================================
 // 公共音色库（Built-in voices）
 // GET /api/v1/voices?voice_type=built-in
 // ============================================================
 
 export async function getPinnedVoices(language = 'en'): Promise<Voice[]> {
-  const response = await apiClient.get('/api/v1/voices', {
-    params: { voice_type: 'built-in', limit: 10 },
-  });
-  const data = normalizeVoiceList(response);
-  return data.voices;
+  const all = await getAllBuiltInVoices();
+  const filtered = language ? all.filter(v => matchesLanguage(v, language)) : all;
+  return filtered.slice(0, 10);
 }
 
 export async function getPublicVoices(params?: VoiceLibraryQueryParams): Promise<VoiceListResponse> {
-  const response = await apiClient.get('/api/v1/voices', {
-    params: {
-      voice_type: 'built-in',
-      keyword: params?.keyword,
-      language_type: params?.language_type,
-      gender: params?.gender,
-      age: params?.age,
-      scene: params?.scene,
-      emotion: params?.emotion,
-      sort: params?.sort,
-      skip: params?.skip ?? 0,
-      limit: params?.limit ?? 20,
-    },
-  });
-  return normalizeVoiceList(response);
+  const all = await getAllBuiltInVoices();
+
+  let filtered = all;
+
+  // 客户端语言过滤（API 不支持服务端过滤）
+  if (params?.language_type) {
+    filtered = filtered.filter(v => matchesLanguage(v, params.language_type!));
+  }
+
+  // 客户端性别过滤
+  if (params?.gender) {
+    const genderMap: Record<string, string[]> = {
+      male: ['男', '男性'], female: ['女', '女性'],
+    };
+    const targets = genderMap[params.gender.toLowerCase()] || [params.gender];
+    filtered = filtered.filter(v => {
+      const labels = typeof v.labels === 'string' ? v.labels : '';
+      return targets.some(t => labels.includes(t));
+    });
+  }
+
+  // 客户端关键词过滤
+  if (params?.keyword) {
+    const kw = params.keyword.toLowerCase();
+    filtered = filtered.filter(v => {
+      const labels = typeof v.labels === 'string' ? v.labels.toLowerCase() : '';
+      const name = v.display_name?.toLowerCase() || '';
+      return labels.includes(kw) || name.includes(kw);
+    });
+  }
+
+  const skip = params?.skip ?? 0;
+  const limit = params?.limit ?? 20;
+  const paged = filtered.slice(skip * limit, skip * limit + limit);
+
+  return { total_count: filtered.length, voices: paged };
 }
 
 // ============================================================
