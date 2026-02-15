@@ -473,10 +473,9 @@ export function TextEditor() {
       await generateSfxAudio(segmentId);
       showToast('Sound effect generated!', 'success');
     } catch (error: any) {
-      const msg = error?.message?.includes('Cannot connect')
-        ? 'AudioX server is not reachable. Check your server configuration.'
-        : error?.message || 'SFX generation failed';
-      showToast(msg, 'error');
+      console.error('SFX generation error:', error);
+      const errMsg = String(error?.message || (typeof error === 'object' ? JSON.stringify(error) : error) || 'Unknown error');
+      showToast(`音效生成失败: ${errMsg}`, 'error');
     } finally {
       setLoadingSegmentId(null);
     }
