@@ -141,12 +141,36 @@ export async function getPublicVoices(params?: VoiceLibraryQueryParams): Promise
   // 客户端性别过滤
   if (params?.gender) {
     const genderMap: Record<string, string[]> = {
-      male: ['男', '男性'], female: ['女', '女性'],
+      male: ['男', '男性'], female: ['女', '女性'], neutral: ['中性'],
     };
     const targets = genderMap[params.gender.toLowerCase()] || [params.gender];
     filtered = filtered.filter(v => {
       const labels = typeof v.labels === 'string' ? v.labels : '';
       return targets.some(t => labels.includes(t));
+    });
+  }
+
+  // 客户端年龄过滤
+  if (params?.age) {
+    const ageMap: Record<string, string[]> = {
+      child: ['儿童', '子供', '少年', '少女'],
+      young_adult: ['青年', '若者'],
+      adult: ['中年', '成人'],
+      elderly: ['老年', '高齢'],
+    };
+    const targets = ageMap[params.age.toLowerCase()] || [params.age];
+    filtered = filtered.filter(v => {
+      const labels = typeof v.labels === 'string' ? v.labels : '';
+      return targets.some(t => labels.includes(t));
+    });
+  }
+
+  // 客户端场景过滤
+  if (params?.scene) {
+    const scenes = params.scene.split(',').map(s => s.trim().toLowerCase());
+    filtered = filtered.filter(v => {
+      const labels = typeof v.labels === 'string' ? v.labels.toLowerCase() : '';
+      return scenes.some(s => labels.includes(s));
     });
   }
 
